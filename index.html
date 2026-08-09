@@ -447,10 +447,28 @@ document.querySelectorAll('.cat').forEach(el=>el.onclick=()=>{
   validate(); dupes();
 });
 
+let photoGpsApplied = false;
+
+/* Jede neue Meldung startet sauber – sonst blockiert eine Kategorie aus der
+   letzten Meldung die Foto-Erkennung der nächsten, und ein spätes GPS-Update
+   vom Gerät kann das GPS aus einem inzwischen gewählten Foto überschreiben. */
+function resetReportForm(){
+  chosen.cat = null; chosen.lat = null; chosen.lng = null; chosen.addr = '';
+  photoGpsApplied = false;
+  document.querySelectorAll('.cat').forEach(x=>x.setAttribute('aria-pressed','false'));
+  document.getElementById('photo').value = '';
+  document.getElementById('photoBox').innerHTML = '<span id="photoLabel">Foto aufnehmen oder auswählen</span>';
+  document.getElementById('photoNote').textContent = '';
+  document.getElementById('dupeBox').innerHTML = '';
+  document.getElementById('send').disabled = true;
+}
+
 document.getElementById('fab').onclick = ()=>{
+  resetReportForm();
   show('report');
   document.getElementById('addr').textContent = "Standort wird ermittelt …";
   locate(pos=>{
+    if(photoGpsApplied) return; // Foto-GPS hat inzwischen Vorrang bekommen
     if(pos){ chosen.lat=pos[0]; chosen.lng=pos[1]; }
     else { const c=map.getCenter(); chosen.lat=c.lat; chosen.lng=c.lng;
            document.getElementById('addr').textContent="Kartenmitte (GPS nicht verfügbar)"; }
@@ -631,8 +649,9 @@ document.getElementById('photo').onchange = e=>{
     const guess = () => {
       catMsg = 'Kategorie wird aus dem Foto geschätzt …'; render();
       suggestCategory(img).then(cat=>{
-        if(cat && !chosen.cat){ selectCat(cat); catMsg = `Kategorie „${sh(cat)}“ aus dem Foto vorgeschlagen – bei Bedarf antippen und ändern.`; }
-        else catMsg = '';
+        if(chosen.cat){ catMsg = ''; } // Nutzer hat inzwischen selbst gewählt
+        else if(cat){ selectCat(cat); catMsg = `Kategorie „${sh(cat)}“ aus dem Foto vorgeschlagen – bei Bedarf antippen und ändern.`; }
+        else catMsg = 'Kategorie aus dem Foto nicht sicher erkannt – bitte auswählen.';
         render();
       });
     };
@@ -645,6 +664,7 @@ document.getElementById('photo').onchange = e=>{
     const gps = exifGPS(gpsReader.result);
     if(!gps) return;
     chosen.lat = gps.lat; chosen.lng = gps.lng;
+    photoGpsApplied = true;
     reverseGeo(); validate(); dupes();
     gpsMsg = 'Standort aus dem Foto (GPS) übernommen.'; render();
   };
