@@ -225,7 +225,8 @@ textarea{min-height:92px;resize:vertical}
     <div class="field">
       <label class="f" for="photo">Foto (hilft der Fachstelle sehr)</label>
       <label class="photo" id="photoBox" for="photo"><span id="photoLabel">Foto aufnehmen oder auswählen</span></label>
-      <input type="file" id="photo" accept="image/*" capture="environment" style="display:none">
+      <input type="file" id="photo" accept="image/*" style="display:none">
+      <p class="hint" id="photoNote"></p>
     </div>
 
     <div class="field">
@@ -503,12 +504,151 @@ function validate(){
   document.getElementById('send').disabled = !(chosen.cat && chosen.lat);
 }
 
-/* photo */
+/* photo: GPS aus EXIF lesen, Kategorie mit einem On-Device-Modell schätzen */
+
+/* Minimaler EXIF-Parser, nur für GPSInfo (JPEG APP1 -> TIFF -> GPS-IFD). */
+function exifGPS(buffer){
+  try{
+    const view = new DataView(buffer);
+    if(view.getUint16(0) !== 0xFFD8) return null;
+    let offset = 2;
+    while(offset < view.byteLength - 2){
+      const marker = view.getUint16(offset);
+      if(marker === 0xFFE1){
+        if(view.getUint32(offset+4) !== 0x45786966) return null; // 'Exif'
+        const tiffStart = offset + 10;
+        const little = view.getUint16(tiffStart) === 0x4949;
+        const u16 = o => view.getUint16(o, little);
+        const u32 = o => view.getUint32(o, little);
+        const ifd0Offset = tiffStart + u32(tiffStart+4);
+        const numEntries = u16(ifd0Offset);
+        let gpsIFDOffset = null;
+        for(let i=0;i<numEntries;i++){
+          const entryOffset = ifd0Offset + 2 + i*12;
+          if(u16(entryOffset) === 0x8825){ gpsIFDOffset = tiffStart + u32(entryOffset+8); break; }
+        }
+        if(gpsIFDOffset === null) return null;
+        const readRational3 = entryOffset => {
+          const valueOffset = tiffStart + u32(entryOffset+8);
+          const vals = [];
+          for(let k=0;k<3;k++){
+            const num = u32(valueOffset+k*8), den = u32(valueOffset+k*8+4);
+            vals.push(den ? num/den : 0);
+          }
+          return vals;
+        };
+        const readAsciiRef = entryOffset => String.fromCharCode(view.getUint8(entryOffset+8));
+        const gpsEntries = u16(gpsIFDOffset);
+        const gps = {};
+        for(let i=0;i<gpsEntries;i++){
+          const entryOffset = gpsIFDOffset + 2 + i*12;
+          const tag = u16(entryOffset);
+          if(tag===1) gps.latRef = readAsciiRef(entryOffset);
+          else if(tag===2) gps.lat = readRational3(entryOffset);
+          else if(tag===3) gps.lngRef = readAsciiRef(entryOffset);
+          else if(tag===4) gps.lng = readRational3(entryOffset);
+        }
+        if(!gps.lat || !gps.lng) return null;
+        const toDeg = ([d,m,s]) => d + m/60 + s/3600;
+        let lat = toDeg(gps.lat), lng = toDeg(gps.lng);
+        if(gps.latRef==='S') lat = -lat;
+        if(gps.lngRef==='W') lng = -lng;
+        return {lat,lng};
+      } else if((marker & 0xFF00) !== 0xFF00){
+        break;
+      } else {
+        offset += 2 + view.getUint16(offset+2);
+      }
+    }
+  } catch(e){ /* kaputtes/untypisches JPEG – kein GPS */ }
+  return null;
+}
+
+/* Kategorie-Vorschlag per MobileNet (ImageNet-Klassen). Die 1000 ImageNet-
+   Klassen sind allgemeine Objekte, keine Mängelmelder-Kategorien – nur dort
+   mappen, wo eine Klasse eindeutig zu einer Kategorie passt. Alles andere
+   bleibt der manuellen Auswahl überlassen. */
+const CAT_KEYWORDS = [
+  {cat:"Lichtsignalanlagen", kw:["traffic light"]},
+  {cat:"Öffentliche Kanalisation", kw:["manhole cover"]},
+  {cat:"defekte ortsfeste Straßenschilder und Fahrbahnmarkierungen", kw:["street sign"]},
+  {cat:"Bauwerke wie Brücken oder Unterführungen ", kw:["viaduct"]},
+  {cat:"Überfüllte Müllbehälter auf Grünflächen", kw:["ashcan","trash can","garbage can","wastebin","dustbin","trash barrel","trash bin"]}
+];
+
+let mobilenetPromise = null;
+function loadMobilenet(){
+  if(!mobilenetPromise) mobilenetPromise = new Promise((resolve,reject)=>{
+    const tf = document.createElement('script');
+    tf.src = 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js';
+    tf.onload = () => {
+      const mn = document.createElement('script');
+      mn.src = 'https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.1/dist/mobilenet.min.js';
+      mn.onload = () => mobilenet.load().then(resolve, reject);
+      mn.onerror = reject;
+      document.head.appendChild(mn);
+    };
+    tf.onerror = reject;
+    document.head.appendChild(tf);
+  });
+  return mobilenetPromise;
+}
+
+async function suggestCategory(imgEl){
+  try{
+    const model = await loadMobilenet();
+    const preds = await model.classify(imgEl, 5);
+    for(const p of preds){
+      if(p.probability < 0.15) continue;
+      const hit = CAT_KEYWORDS.find(k => k.kw.some(w => p.className.toLowerCase().includes(w)));
+      if(hit) return hit.cat;
+    }
+  } catch(e){ /* Modell nicht ladbar (offline, CDN blockiert) – einfach überspringen */ }
+  return null;
+}
+
+function selectCat(cat){
+  const btn = [...document.querySelectorAll('.cat')].find(el => el.dataset.cat.replace(/&amp;/g,'&') === cat);
+  if(!btn) return;
+  document.querySelectorAll('.cat').forEach(x=>x.setAttribute('aria-pressed','false'));
+  btn.setAttribute('aria-pressed','true');
+  chosen.cat = cat;
+  validate(); dupes();
+}
+
 document.getElementById('photo').onchange = e=>{
-  const f=e.target.files[0]; if(!f) return;
-  const r=new FileReader();
-  r.onload=()=>{document.getElementById('photoBox').innerHTML=`<img src="${r.result}" alt="Vorschau">`;};
-  r.readAsDataURL(f);
+  const f = e.target.files[0]; if(!f) return;
+  const note = document.getElementById('photoNote');
+  let gpsMsg = '', catMsg = '';
+  const render = () => { note.textContent = [gpsMsg, catMsg].filter(Boolean).join(' '); };
+  render();
+
+  const previewReader = new FileReader();
+  previewReader.onload = () => {
+    document.getElementById('photoBox').innerHTML = `<img id="photoPreview" src="${previewReader.result}" alt="Vorschau">`;
+    if(chosen.cat) return; // Nutzer hat schon gewählt, nicht überschreiben
+    const img = document.getElementById('photoPreview');
+    const guess = () => {
+      catMsg = 'Kategorie wird aus dem Foto geschätzt …'; render();
+      suggestCategory(img).then(cat=>{
+        if(cat && !chosen.cat){ selectCat(cat); catMsg = `Kategorie „${sh(cat)}“ aus dem Foto vorgeschlagen – bei Bedarf antippen und ändern.`; }
+        else catMsg = '';
+        render();
+      });
+    };
+    img.complete ? guess() : img.onload = guess;
+  };
+  previewReader.readAsDataURL(f);
+
+  const gpsReader = new FileReader();
+  gpsReader.onload = () => {
+    const gps = exifGPS(gpsReader.result);
+    if(!gps) return;
+    chosen.lat = gps.lat; chosen.lng = gps.lng;
+    reverseGeo(); validate(); dupes();
+    gpsMsg = 'Standort aus dem Foto (GPS) übernommen.'; render();
+  };
+  gpsReader.readAsArrayBuffer(f);
 };
 
 /* submit
