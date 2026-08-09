@@ -134,6 +134,9 @@ textarea{min-height:92px;resize:vertical}
 .dupe .d{font-size:13px;padding:5px 0;border-top:1px solid #EBCFCA}
 .photo{border:1.5px dashed var(--ink-3);border-radius:3px;padding:16px;text-align:center;background:#fff;cursor:pointer;font-size:13.5px}
 .photo img{max-width:100%;border-radius:2px;display:block;margin:0 auto}
+.spin{display:inline-block;width:10px;height:10px;border:2px solid var(--line);border-top-color:var(--ink-2);
+  border-radius:50%;animation:spin .7s linear infinite;vertical-align:-1.5px;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
 .send{width:100%;background:var(--signal);border:2px solid var(--ink);border-radius:3px;padding:15px;
   font-family:"Archivo Narrow";font-weight:700;font-size:16px;letter-spacing:.1em;text-transform:uppercase;cursor:pointer;box-shadow:0 3px 0 var(--ink)}
 .send:disabled{opacity:.4;box-shadow:none;cursor:not-allowed}
@@ -203,8 +206,13 @@ textarea{min-height:92px;resize:vertical}
 <div class="modal" id="report">
   <div class="mhead"><h2>Schnellmeldung</h2><button class="x" id="closeReport" aria-label="Schließen">×</button></div>
   <div class="mbody">
-    <p class="step"><em>1</em> — Was ist los?</p>
-    <div class="grid" id="catgrid"></div>
+    <p class="step"><em>1</em> — Foto</p>
+    <div class="field">
+      <label class="photo" id="photoBox" for="photo"><span id="photoLabel">Foto aufnehmen oder auswählen</span></label>
+      <input type="file" id="photo" accept="image/*" style="display:none">
+      <p class="hint" id="photoNote"></p>
+      <p class="hint">Optional, aber ein Foto füllt Standort und Kategorie unten automatisch aus, wenn möglich.</p>
+    </div>
 
     <p class="step"><em>2</em> — Wo?</p>
     <div class="field">
@@ -212,21 +220,17 @@ textarea{min-height:92px;resize:vertical}
         <div><div class="addr" id="addr">Standort wird ermittelt …</div><div class="co mono" id="coords">—</div></div>
         <button class="mini" id="pickOnMap">Auf Karte setzen</button>
       </div>
-      <p class="hint">Standort kommt automatisch vom Gerät. Nur antippen, wenn er nicht stimmt.</p>
+      <p class="hint">Standort kommt automatisch vom Gerät oder Foto. Nur antippen, wenn er nicht stimmt.</p>
     </div>
 
     <div id="dupeBox"></div>
 
-    <p class="step"><em>3</em> — Kurz beschreiben</p>
+    <p class="step"><em>3</em> — Was ist los?</p>
+    <div class="grid" id="catgrid"></div>
+
+    <p class="step"><em>4</em> — Kurz beschreiben</p>
     <div class="field">
       <textarea id="text" placeholder="z. B. Sperrmüll neben dem Altglascontainer, seit Freitag"></textarea>
-    </div>
-
-    <div class="field">
-      <label class="f" for="photo">Foto (hilft der Fachstelle sehr)</label>
-      <label class="photo" id="photoBox" for="photo"><span id="photoLabel">Foto aufnehmen oder auswählen</span></label>
-      <input type="file" id="photo" accept="image/*" style="display:none">
-      <p class="hint" id="photoNote"></p>
     </div>
 
     <div class="field">
@@ -582,6 +586,16 @@ function exifGPS(buffer){
   return null;
 }
 
+/* iPhones speichern standardmäßig als HEIC – das kann exifGPS() nicht lesen.
+   Lieber das klar sagen als still gar nichts zu tun. */
+function isHEIC(buffer){
+  if(buffer.byteLength < 12) return false;
+  const view = new DataView(buffer);
+  if(view.getUint32(4) !== 0x66747970) return false; // 'ftyp'-Box
+  const brand = String.fromCharCode(view.getUint8(8),view.getUint8(9),view.getUint8(10),view.getUint8(11));
+  return ['heic','heix','heim','heis','hevc','hevx','mif1','msf1'].includes(brand);
+}
+
 /* Kategorie-Vorschlag per MobileNet (ImageNet-Klassen). Die 1000 ImageNet-
    Klassen sind allgemeine Objekte, keine Mängelmelder-Kategorien – nur dort
    mappen, wo eine Klasse eindeutig zu einer Kategorie passt. Alles andere
@@ -625,6 +639,17 @@ async function suggestCategory(imgEl){
   return null;
 }
 
+/* Modell-Download + Klassifizierung können auf einem langsamen/alten Handy
+   lange dauern und dabei den Hauptthread blockieren. Statt die Nutzerin
+   endlos warten zu lassen, geben wir nach ein paar Sekunden auf – manuell
+   wählen bleibt immer möglich. */
+function suggestCategoryWithTimeout(imgEl, ms){
+  return Promise.race([
+    suggestCategory(imgEl),
+    new Promise(resolve => setTimeout(()=>resolve('timeout'), ms))
+  ]);
+}
+
 function selectCat(cat){
   const btn = [...document.querySelectorAll('.cat')].find(el => el.dataset.cat.replace(/&amp;/g,'&') === cat);
   if(!btn) return;
@@ -638,7 +663,7 @@ document.getElementById('photo').onchange = e=>{
   const f = e.target.files[0]; if(!f) return;
   const note = document.getElementById('photoNote');
   let gpsMsg = '', catMsg = '';
-  const render = () => { note.textContent = [gpsMsg, catMsg].filter(Boolean).join(' '); };
+  const render = () => { note.innerHTML = [gpsMsg, catMsg].filter(Boolean).join(' '); };
   render();
 
   const previewReader = new FileReader();
@@ -646,14 +671,16 @@ document.getElementById('photo').onchange = e=>{
     document.getElementById('photoBox').innerHTML = `<img id="photoPreview" src="${previewReader.result}" alt="Vorschau">`;
     if(chosen.cat) return; // Nutzer hat schon gewählt, nicht überschreiben
     const img = document.getElementById('photoPreview');
-    const guess = () => {
-      catMsg = 'Kategorie wird aus dem Foto geschätzt …'; render();
-      suggestCategory(img).then(cat=>{
-        if(chosen.cat){ catMsg = ''; } // Nutzer hat inzwischen selbst gewählt
-        else if(cat){ selectCat(cat); catMsg = `Kategorie „${sh(cat)}“ aus dem Foto vorgeschlagen – bei Bedarf antippen und ändern.`; }
-        else catMsg = 'Kategorie aus dem Foto nicht sicher erkannt – bitte auswählen.';
-        render();
-      });
+    const guess = async () => {
+      catMsg = '<span class="spin"></span>Kategorie wird aus dem Foto geschätzt …'; render();
+      // erst den Spinner zeichnen lassen, bevor die Klassifizierung den Hauptthread belegt
+      await new Promise(r => requestAnimationFrame(()=>requestAnimationFrame(r)));
+      const cat = await suggestCategoryWithTimeout(img, 12000);
+      if(chosen.cat) catMsg = ''; // Nutzer hat inzwischen selbst gewählt
+      else if(cat === 'timeout') catMsg = 'Kategorie-Erkennung dauert zu lange – bitte manuell wählen.';
+      else if(cat){ selectCat(cat); catMsg = `Kategorie „${sh(cat)}“ aus dem Foto vorgeschlagen – bei Bedarf antippen und ändern.`; }
+      else catMsg = 'Kategorie aus dem Foto nicht sicher erkannt – bitte auswählen.';
+      render();
     };
     img.complete ? guess() : img.onload = guess;
   };
@@ -661,12 +688,19 @@ document.getElementById('photo').onchange = e=>{
 
   const gpsReader = new FileReader();
   gpsReader.onload = () => {
-    const gps = exifGPS(gpsReader.result);
-    if(!gps) return;
-    chosen.lat = gps.lat; chosen.lng = gps.lng;
-    photoGpsApplied = true;
-    reverseGeo(); validate(); dupes();
-    gpsMsg = 'Standort aus dem Foto (GPS) übernommen.'; render();
+    const buf = gpsReader.result;
+    const gps = exifGPS(buf);
+    if(gps){
+      chosen.lat = gps.lat; chosen.lng = gps.lng;
+      photoGpsApplied = true;
+      reverseGeo(); validate(); dupes();
+      gpsMsg = 'Standort aus dem Foto (GPS) übernommen.';
+    } else if(isHEIC(buf)){
+      gpsMsg = 'HEIC-Foto: Standort kann daraus nicht gelesen werden.';
+    } else {
+      gpsMsg = 'Kein GPS im Foto gefunden – ggf. beim Auswählen unter „Optionen“ den Standort aktivieren.';
+    }
+    render();
   };
   gpsReader.readAsArrayBuffer(f);
 };
