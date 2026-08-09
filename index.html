@@ -133,7 +133,11 @@ textarea{min-height:92px;resize:vertical}
 .dupe h4{margin:0 0 6px;font-family:"Archivo Narrow";font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--alert)}
 .dupe .d{font-size:13px;padding:5px 0;border-top:1px solid #EBCFCA}
 .photo{border:1.5px dashed var(--ink-3);border-radius:3px;padding:16px;text-align:center;background:#fff;cursor:pointer;font-size:13.5px}
+.photo.has-img{border-style:solid;border-color:var(--ink);padding:0;overflow:hidden;cursor:default}
 .photo img{max-width:100%;border-radius:2px;display:block;margin:0 auto}
+.photo.has-img img{max-height:230px;width:100%;object-fit:cover;border-radius:0}
+.photo-remove{display:block;margin:8px auto 0;font-family:"Archivo Narrow";font-weight:700;font-size:11px;
+  letter-spacing:.08em;text-transform:uppercase;color:var(--alert);background:none;border:none;cursor:pointer;padding:2px}
 .spin{display:inline-block;width:10px;height:10px;border:2px solid var(--line);border-top-color:var(--ink-2);
   border-radius:50%;animation:spin .7s linear infinite;vertical-align:-1.5px;margin-right:6px}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -209,9 +213,10 @@ textarea{min-height:92px;resize:vertical}
     <p class="step"><em>1</em> — Foto</p>
     <div class="field">
       <label class="photo" id="photoBox" for="photo"><span id="photoLabel">Foto aufnehmen oder auswählen</span></label>
+      <button type="button" class="photo-remove" id="photoRemove" style="display:none">✕ Foto entfernen</button>
       <input type="file" id="photo" accept="image/*" style="display:none">
       <p class="hint" id="photoNote"></p>
-      <p class="hint">Optional, aber ein Foto füllt Standort und Kategorie unten automatisch aus, wenn möglich.</p>
+      <p class="hint" id="photoHint">Optional, aber ein Foto füllt Standort, Kategorie und Beschreibung unten automatisch aus, wenn möglich.</p>
     </div>
 
     <p class="step"><em>2</em> — Wo?</p>
@@ -453,19 +458,32 @@ document.querySelectorAll('.cat').forEach(el=>el.onclick=()=>{
 
 let photoGpsApplied = false;
 
+function clearPhoto(){
+  document.getElementById('photo').value = '';
+  const box = document.getElementById('photoBox');
+  box.classList.remove('has-img');
+  box.innerHTML = '<span id="photoLabel">Foto aufnehmen oder auswählen</span>';
+  document.getElementById('photoRemove').style.display = 'none';
+  document.getElementById('photoNote').innerHTML = '';
+  document.getElementById('photoHint').style.display = '';
+}
+
 /* Jede neue Meldung startet sauber – sonst blockiert eine Kategorie aus der
    letzten Meldung die Foto-Erkennung der nächsten, und ein spätes GPS-Update
-   vom Gerät kann das GPS aus einem inzwischen gewählten Foto überschreiben. */
+   vom Gerät kann das GPS aus einem inzwischen gewählten Foto überschreiben.
+   Ohne das Leeren von #text würde außerdem ein automatisch aus dem Foto
+   erzeugter Beschreibungstext aus der letzten Meldung den nächsten blockieren. */
 function resetReportForm(){
   chosen.cat = null; chosen.lat = null; chosen.lng = null; chosen.addr = '';
   photoGpsApplied = false;
   document.querySelectorAll('.cat').forEach(x=>x.setAttribute('aria-pressed','false'));
-  document.getElementById('photo').value = '';
-  document.getElementById('photoBox').innerHTML = '<span id="photoLabel">Foto aufnehmen oder auswählen</span>';
-  document.getElementById('photoNote').textContent = '';
+  clearPhoto();
+  document.getElementById('text').value = '';
   document.getElementById('dupeBox').innerHTML = '';
   document.getElementById('send').disabled = true;
 }
+
+document.getElementById('photoRemove').onclick = () => clearPhoto();
 
 document.getElementById('fab').onclick = ()=>{
   resetReportForm();
@@ -608,6 +626,24 @@ const CAT_KEYWORDS = [
   {cat:"Überfüllte Müllbehälter auf Grünflächen", kw:["ashcan","trash can","garbage can","wastebin","dustbin","trash barrel","trash bin"]}
 ];
 
+/* Vorausgefüllter Entwurf für die Beschreibung, passend zur erkannten
+   Kategorie – kein echtes Bildverständnis, nur ein Textbaustein zum Losschreiben.
+   Wird nur eingesetzt, wenn das Feld noch leer ist, und bleibt jederzeit editierbar. */
+const DESC_TEMPLATES = {
+  "Lichtsignalanlagen": "Ampel/Lichtsignalanlage laut Foto – bitte kurz ergänzen, was nicht stimmt (z. B. schaltet nicht, ist dunkel).",
+  "Öffentliche Kanalisation": "Gullydeckel/Kanalisation laut Foto – bitte kurz ergänzen, was nicht stimmt (z. B. offen, beschädigt, verstopft).",
+  "defekte ortsfeste Straßenschilder und Fahrbahnmarkierungen": "Straßenschild/Markierung laut Foto – bitte kurz ergänzen, was nicht stimmt (z. B. umgeknickt, verblasst, fehlt).",
+  "Bauwerke wie Brücken oder Unterführungen ": "Brücke/Unterführung laut Foto – bitte kurz ergänzen, was nicht stimmt.",
+  "Überfüllte Müllbehälter auf Grünflächen": "Mülltonne laut Foto überfüllt – bitte Ort und seit wann ergänzen."
+};
+
+function fillDescTemplate(cat){
+  const t = document.getElementById('text');
+  if(t.value.trim()) return; // Nutzer hat schon selbst etwas geschrieben
+  const tpl = DESC_TEMPLATES[cat];
+  if(tpl) t.value = tpl;
+}
+
 let mobilenetPromise = null;
 function loadMobilenet(){
   if(!mobilenetPromise) mobilenetPromise = new Promise((resolve,reject)=>{
@@ -668,7 +704,11 @@ document.getElementById('photo').onchange = e=>{
 
   const previewReader = new FileReader();
   previewReader.onload = () => {
-    document.getElementById('photoBox').innerHTML = `<img id="photoPreview" src="${previewReader.result}" alt="Vorschau">`;
+    const box = document.getElementById('photoBox');
+    box.classList.add('has-img');
+    box.innerHTML = `<img id="photoPreview" src="${previewReader.result}" alt="Vorschau">`;
+    document.getElementById('photoRemove').style.display = 'block';
+    document.getElementById('photoHint').style.display = 'none';
     if(chosen.cat) return; // Nutzer hat schon gewählt, nicht überschreiben
     const img = document.getElementById('photoPreview');
     const guess = async () => {
@@ -678,7 +718,7 @@ document.getElementById('photo').onchange = e=>{
       const cat = await suggestCategoryWithTimeout(img, 12000);
       if(chosen.cat) catMsg = ''; // Nutzer hat inzwischen selbst gewählt
       else if(cat === 'timeout') catMsg = 'Kategorie-Erkennung dauert zu lange – bitte manuell wählen.';
-      else if(cat){ selectCat(cat); catMsg = `Kategorie „${sh(cat)}“ aus dem Foto vorgeschlagen – bei Bedarf antippen und ändern.`; }
+      else if(cat){ selectCat(cat); fillDescTemplate(cat); catMsg = `Kategorie „${sh(cat)}“ und ein Beschreibungs-Entwurf aus dem Foto übernommen – bei Bedarf anpassen.`; }
       else catMsg = 'Kategorie aus dem Foto nicht sicher erkannt – bitte auswählen.';
       render();
     };
