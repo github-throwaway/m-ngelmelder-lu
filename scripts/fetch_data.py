@@ -95,7 +95,7 @@ def main():
             "lat": round(c[1], 5),
             "lng": round(c[0], 5),
             "date": (m.get("created") or "")[:10],
-            "text": " ".join((m.get("text") or "").split())[:150],
+            "text": " ".join((m.get("text") or "").split())[:2000],
             "resp": m.get("responsible_name") or "",
         })
 

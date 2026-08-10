@@ -73,8 +73,11 @@ header{background:var(--ink);color:var(--paper);padding:calc(env(safe-area-inset
 .locbtn{position:fixed;right:12px;bottom:calc(12px + var(--sheet-h));z-index:600;width:42px;height:42px;border-radius:3px;
   border:1.5px solid var(--ink);background:var(--paper);cursor:pointer;display:grid;place-items:center;box-shadow:0 2px 6px rgba(0,0,0,.25)}
 .locbtn svg{width:19px;height:19px}
+.locbtn.busy{opacity:.55;pointer-events:none}
 .pinhint{position:absolute;left:50%;top:14px;transform:translateX(-50%);z-index:600;background:var(--ink);color:var(--signal);
   font-size:12px;padding:7px 12px;border-radius:3px;display:none;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,.4)}
+.locerr{position:fixed;right:12px;left:12px;bottom:calc(62px + var(--sheet-h));z-index:600;background:var(--ink);color:#fff;
+  font-size:12.5px;padding:9px 12px;border-radius:3px;display:none;font-weight:500;box-shadow:0 2px 8px rgba(0,0,0,.4);text-align:center}
 .crosshair{position:absolute;left:50%;top:50%;transform:translate(-50%,-100%);z-index:590;display:none;pointer-events:none;font-size:34px;line-height:1}
 
 /* ---------- bottom sheet ---------- */
@@ -198,6 +201,7 @@ textarea{min-height:92px;resize:vertical}
     <div id="map"></div>
     <div class="crosshair" id="cross">📍</div>
     <div class="pinhint" id="pinhint">Karte verschieben – Pin bleibt mittig</div>
+    <div class="locerr" id="locerr"></div>
     <button class="locbtn" id="locate" aria-label="Meinen Standort zeigen">
       <svg viewBox="0 0 24 24" fill="none" stroke="#14171C" stroke-width="2"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="1.6" fill="#14171C"/><path d="M12 1v3M12 20v3M1 12h3M20 12h3"/></svg>
     </button>
@@ -242,6 +246,7 @@ textarea{min-height:92px;resize:vertical}
 
     <p class="step"><em>3</em> — Was ist los?</p>
     <div class="grid" id="catgrid"></div>
+    <p class="hint" id="catFullName"></p>
 
     <p class="step"><em>4</em> — Kurz beschreiben</p>
     <div class="field">
@@ -425,9 +430,32 @@ function locate(then){
     if(meMarker) map.removeLayer(meMarker);
     meMarker = L.circleMarker(me,{radius:7,color:'#14171C',weight:2,fillColor:'#0B6E99',fillOpacity:1}).addTo(map);
     then ? then(me) : (map.setView(me,16), renderList());
-  }, ()=> then && then(null), {enableHighAccuracy:true,timeout:8000,maximumAge:60000});
+  }, err => then && then(null, err), {enableHighAccuracy:true,timeout:8000,maximumAge:60000});
 }
-document.getElementById('locate').onclick = ()=>locate();
+
+/* Der Locate-Button rief locate() bisher ohne "then" auf: bei Erfolg passierte
+   etwas sichtbares (Karte springt zum Standort), bei Fehler/Ablehnung aber
+   nichts – kein Hinweis, kein Feedback, sieht aus wie "Button tut nichts". */
+let locErrTimer = null;
+function showLocateError(err){
+  const el = document.getElementById('locerr');
+  el.textContent =
+    err && err.code === 1 ? 'Standortzugriff blockiert – bitte in den Browser-Einstellungen erlauben.' :
+    err && err.code === 3 ? 'Standortabfrage hat zu lange gedauert – bitte erneut versuchen.' :
+    'Standort momentan nicht verfügbar.';
+  el.style.display = 'block';
+  clearTimeout(locErrTimer);
+  locErrTimer = setTimeout(()=>{ el.style.display = 'none'; }, 4500);
+}
+document.getElementById('locate').onclick = ()=>{
+  const btn = document.getElementById('locate');
+  btn.classList.add('busy');
+  locate((pos, err)=>{
+    btn.classList.remove('busy');
+    if(pos){ map.setView(pos,16); renderList(); }
+    else showLocateError(err);
+  });
+};
 
 /* ---------- detail ---------- */
 function openDetail(it){
@@ -459,12 +487,7 @@ document.getElementById('scrim').onclick=()=>{hide('detail');hide('report');};
 document.getElementById('catgrid').innerHTML = CATS
   .slice().sort((a,b)=>sh(a).localeCompare(sh(b),'de'))
   .map(c=>`<button class="cat" data-cat="${esc(c)}" aria-pressed="false"><b>${ab(c)}</b>${sh(c)}</button>`).join('');
-document.querySelectorAll('.cat').forEach(el=>el.onclick=()=>{
-  document.querySelectorAll('.cat').forEach(x=>x.setAttribute('aria-pressed','false'));
-  el.setAttribute('aria-pressed','true');
-  chosen.cat = el.dataset.cat.replace(/&amp;/g,'&');
-  validate(); dupes();
-});
+document.querySelectorAll('.cat').forEach(el=>el.onclick=()=>selectCat(el.dataset.cat.replace(/&amp;/g,'&')));
 
 let photoGpsApplied = false;
 
@@ -487,6 +510,7 @@ function resetReportForm(){
   chosen.cat = null; chosen.lat = null; chosen.lng = null; chosen.addr = '';
   photoGpsApplied = false;
   document.querySelectorAll('.cat').forEach(x=>x.setAttribute('aria-pressed','false'));
+  document.getElementById('catFullName').textContent = '';
   clearPhoto();
   document.getElementById('text').value = '';
   document.getElementById('dupeBox').innerHTML = '';
@@ -702,6 +726,9 @@ function selectCat(cat){
   document.querySelectorAll('.cat').forEach(x=>x.setAttribute('aria-pressed','false'));
   btn.setAttribute('aria-pressed','true');
   chosen.cat = cat;
+  // Die Kürzel/Kurznamen sind nur Anzeige – zeigen, dass die offizielle
+  // Bezeichnung (die tatsächlich ans Formular geht) trotzdem exakt passt.
+  document.getElementById('catFullName').textContent = sh(cat) !== cat ? `Offizielle Bezeichnung: ${cat}` : '';
   validate(); dupes();
 }
 
