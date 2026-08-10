@@ -70,7 +70,7 @@ header{background:var(--ink);color:var(--paper);padding:calc(env(safe-area-inset
 .mk.s2{background:#D6D9DD;color:#4A5158;border-color:#8A9099;opacity:.72}
 .cl{background:var(--ink);color:var(--signal);border-radius:50%;display:flex;align-items:center;justify-content:center;
   font-family:"IBM Plex Mono";font-weight:600;font-size:12px;border:2px solid var(--signal);box-shadow:0 2px 6px rgba(0,0,0,.35)}
-.locbtn{position:absolute;right:12px;bottom:calc(12px + var(--sheet-h));z-index:600;width:42px;height:42px;border-radius:3px;
+.locbtn{position:fixed;right:12px;bottom:calc(12px + var(--sheet-h));z-index:600;width:42px;height:42px;border-radius:3px;
   border:1.5px solid var(--ink);background:var(--paper);cursor:pointer;display:grid;place-items:center;box-shadow:0 2px 6px rgba(0,0,0,.25)}
 .locbtn svg{width:19px;height:19px}
 .pinhint{position:absolute;left:50%;top:14px;transform:translateX(-50%);z-index:600;background:var(--ink);color:var(--signal);
@@ -132,7 +132,7 @@ textarea{min-height:92px;resize:vertical}
 .dupe{border:1.5px solid var(--alert);background:#FBEEEC;border-radius:3px;padding:11px;margin-bottom:18px}
 .dupe h4{margin:0 0 6px;font-family:"Archivo Narrow";font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--alert)}
 .dupe .d{font-size:13px;padding:5px 0;border-top:1px solid #EBCFCA}
-.photo{border:1.5px dashed var(--ink-3);border-radius:3px;padding:16px;text-align:center;background:#fff;cursor:pointer;font-size:13.5px}
+.photo{display:block;border:1.5px dashed var(--ink-3);border-radius:3px;padding:16px;text-align:center;background:#fff;cursor:pointer;font-size:13.5px}
 .photo.has-img{border-style:solid;border-color:var(--ink);padding:0;overflow:hidden;cursor:default}
 .photo img{max-width:100%;border-radius:2px;display:block;margin:0 auto}
 .photo.has-img img{max-height:230px;width:100%;object-fit:cover;border-radius:0}
@@ -158,6 +158,16 @@ textarea{min-height:92px;resize:vertical}
 .foot a{color:var(--ink-2)}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 :focus-visible{outline:3px solid #0B6E99;outline-offset:2px}
+
+/* ---------- desktop: this is a phone-shaped app, don't stretch it edge to
+   edge on a wide screen. #app is the transform-containing block for its
+   position:fixed descendants (.fab, .locbtn), so they stay inside the
+   centered column too instead of snapping to the real window edges. */
+@media (min-width:640px){
+  body{background:var(--ink)}
+  #app,.scrim,.modal{left:50%;right:auto;width:100%;max-width:480px;transform:translateX(-50%)}
+  #app{box-shadow:0 0 0 1px var(--ink),0 24px 60px rgba(0,0,0,.5)}
+}
 </style>
 </head>
 <body>
