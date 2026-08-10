@@ -14,6 +14,7 @@
   --ink:#14171C; --ink-2:#2C323B; --ink-3:#6B7480;
   --concrete:#E7E4DE; --paper:#F6F5F2; --line:#CFCBC2;
   --signal:#F2C200; --open:#F2C200; --done:#1F7A45; --dead:#8A9099; --alert:#C4321F;
+  --crest:#B0122B; /* Wappenrot der Stadt (gelber Anker auf Rot) – neben --signal die zweite Wappenfarbe */
   --sheet-h:44vh;
   --safe-b:env(safe-area-inset-bottom,0px);
 }
@@ -40,7 +41,7 @@ header{background:var(--ink);color:var(--paper);padding:calc(env(safe-area-inset
 .tally b{font-family:"IBM Plex Mono";font-weight:600;font-size:17px;display:block;line-height:1}
 .tally i{font-style:normal;font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;color:#8D949E}
 .tally .t-open b{color:var(--open)} .tally .t-done b{color:#4FBF80}
-.hazard{height:6px;background:repeating-linear-gradient(-45deg,var(--signal) 0 9px,var(--ink) 9px 18px)}
+.hazard{height:6px;background:repeating-linear-gradient(-45deg,var(--signal) 0 9px,var(--crest) 9px 18px)}
 
 /* ---------- filter rail ---------- */
 .rail{background:var(--paper);border-bottom:1px solid var(--line);flex:0 0 auto}
